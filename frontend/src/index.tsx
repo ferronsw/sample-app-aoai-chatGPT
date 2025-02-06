@@ -10,9 +10,9 @@ import { AppStateProvider } from './state/AppProvider'
 
 import './index.css'
 
-initializeIcons(
-  'https://res.cdn.office.net/files/fabric-cdn-prod_20240129.001/assets/icons/',
-);
+initializeIcons("https://res.cdn.office.net/files/fabric-cdn-prod_20241209.001/assets/icons/"); 
+// or
+initializeFileTypeIcons("https://res.cdn.office.net/files/fabric-cdn-prod_20241209.001/assets/item-types/");
 
 export default function App() {
   return (
