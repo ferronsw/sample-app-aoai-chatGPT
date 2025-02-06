@@ -10,7 +10,7 @@ import { AppStateProvider } from './state/AppProvider'
 
 import './index.css'
 
-initializeIcons("https://static2.sharepointonline.com/files/fabric/assets/icons/")
+initializeIcons("")
 
 export default function App() {
   return (
