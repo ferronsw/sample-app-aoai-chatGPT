@@ -5,6 +5,7 @@ import logging
 import uuid
 import httpx
 import asyncio
+from azure.monitor.opentelemetry import configure_azure_monitor
 from quart import (
     Blueprint,
     Quart,
@@ -39,6 +40,9 @@ from backend.utils import (
 bp = Blueprint("routes", __name__, static_folder="static", template_folder="static")
 
 cosmos_db_ready = asyncio.Event()
+
+# Configure Azure monitor collection telemetry pipeline
+configure_azure_monitor()
 
 
 def create_app():
