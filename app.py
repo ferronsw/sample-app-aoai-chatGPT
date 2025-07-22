@@ -41,11 +41,10 @@ bp = Blueprint("routes", __name__, static_folder="static", template_folder="stat
 
 cosmos_db_ready = asyncio.Event()
 
-# Configure Azure monitor collection telemetry pipeline
-configure_azure_monitor()
-
-
 def create_app():
+    # Configure Azure monitor collection telemetry pipeline
+    configure_azure_monitor()
+
     app = Quart(__name__)
     app.register_blueprint(bp)
     app.config["TEMPLATES_AUTO_RELOAD"] = True
