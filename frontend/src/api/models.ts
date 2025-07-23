@@ -133,12 +133,17 @@ export type UI = {
   show_chat_history_button?: boolean
 }
 
+export type ApplicationInsights = {
+  connection_string: string
+}
+
 export type FrontendSettings = {
   auth_enabled?: string | null
   feedback_enabled?: string | null
   ui?: UI
   sanitize_answer?: boolean
   oyd_enabled?: boolean
+  application_insights?: ApplicationInsights
 }
 
 export enum Feedback {

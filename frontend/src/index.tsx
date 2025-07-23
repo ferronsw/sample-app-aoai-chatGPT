@@ -10,7 +10,7 @@ import { AppStateProvider } from './state/AppProvider'
 
 import './index.css'
 
-initializeIcons();
+initializeIcons()
 
 export default function App() {
   return (
