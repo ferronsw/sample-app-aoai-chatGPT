@@ -793,7 +793,8 @@ class _AppSettings(BaseModel):
     azure_openai: _AzureOpenAISettings = _AzureOpenAISettings()
     search: _SearchCommonSettings = _SearchCommonSettings()
     ui: Optional[_UiSettings] = _UiSettings()
-    application_insights: Optional[_ApplicationInsightsSettings] = _ApplicationInsightsSettings
+    application_insights: Optional[_ApplicationInsightsSettings] = _ApplicationInsightsSettings(
+    )
 
     # Constructed properties
     chat_history: Optional[_ChatHistorySettings] = None
