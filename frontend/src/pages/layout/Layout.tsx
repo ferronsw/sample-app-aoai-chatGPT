@@ -13,7 +13,7 @@ import styles from './Layout.module.css'
 import { ApplicationInsights } from '@microsoft/applicationinsights-web'
 import { ReactPlugin } from '@microsoft/applicationinsights-react-js'
 import { createBrowserHistory } from 'history'
-const browserHistory = createBrowserHistory({ basename: '' })
+const browserHistory = createBrowserHistory()
 var reactPlugin = new ReactPlugin()
 
 const Layout = () => {

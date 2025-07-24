@@ -5,3 +5,13 @@ frontend/node_modules
 .azure/
 __pycache__/
 .ipynb_checkpoints/
+frontend/package.json:sec.endpointdlp
+frontend/src/index.css:sec.endpointdlp
+frontend/src/components/Answer/Answer.module.css:sec.endpointdlp
+frontend/src/components/ChatHistory/ChatHistoryPanel.module.css:sec.endpointdlp
+frontend/src/components/common/Button.module.css:sec.endpointdlp
+frontend/src/components/QuestionInput/QuestionInput.module.css:sec.endpointdlp
+frontend/src/pages/chat/Chat.module.css:sec.endpointdlp
+frontend/src/pages/layout/Layout.module.css:sec.endpointdlp
+requirements.txt:sec.endpointdlp
+start.cmd:sec.endpointdlp
