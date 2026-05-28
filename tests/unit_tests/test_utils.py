@@ -71,6 +71,13 @@ def test_should_retry_with_max_tokens_for_unsupported_max_completion_tokens_erro
         error, {"max_completion_tokens": 128}) is True
 
 
+def test_should_retry_with_max_tokens_for_extra_inputs_validation_error():
+    error = "Error code: 400 - {'error': {'requestid': '4aa7265f-8daf-45da-b1b6-2be48b1eea8a', 'code': 400, 'message': 'Validation error at #/max_completion_tokens: Extra inputs are not permitted'}}"
+
+    assert should_retry_with_max_tokens(
+        error, {"max_completion_tokens": 128}) is True
+
+
 def test_should_not_retry_with_max_completion_tokens_for_other_errors():
     error = "The request body is invalid."
 
