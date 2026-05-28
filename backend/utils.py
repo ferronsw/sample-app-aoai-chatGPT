@@ -70,7 +70,6 @@ def should_retry_with_max_tokens(error, model_args: dict) -> bool:
             or "unsupported" in error_message
             or "unknown parameter" in error_message
             or "unrecognized request argument" in error_message
-            or "extra inputs are not permitted" in error_message
         )
     )
 
@@ -88,7 +87,6 @@ def should_retry_with_max_completion_tokens(error, model_args: dict) -> bool:
             or "unsupported" in error_message
             or "unknown parameter" in error_message
             or "unrecognized request argument" in error_message
-            or "extra inputs are not permitted" in error_message
         )
     )
 
