@@ -34,6 +34,10 @@ from backend.utils import (
     format_non_streaming_response,
     convert_to_pf_format,
     format_pf_non_streaming_response,
+    should_retry_with_max_tokens,
+    should_retry_with_max_completion_tokens,
+    with_max_tokens,
+    with_max_completion_tokens,
 )
 
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -258,7 +262,7 @@ def prepare_model_args(request_body, request_headers):
     model_args = {
         "messages": messages,
         "temperature": app_settings.azure_openai.temperature,
-        "max_tokens": app_settings.azure_openai.max_tokens,
+        "max_completion_tokens": app_settings.azure_openai.max_tokens,
         "top_p": app_settings.azure_openai.top_p,
         "stop": app_settings.azure_openai.stop_sequence,
         "stream": app_settings.azure_openai.stream,
@@ -349,6 +353,22 @@ async def promptflow_request(request):
             f"An error occurred while making promptflow_request: {e}")
 
 
+async def create_chat_completion_with_token_compat(create_completion, model_args):
+    try:
+        return await create_completion(model_args)
+    except Exception as error:
+        if should_retry_with_max_tokens(error, model_args):
+            logging.info("Retrying chat completion request with max_tokens")
+            return await create_completion(with_max_tokens(model_args))
+
+        if should_retry_with_max_completion_tokens(error, model_args):
+            logging.info(
+                "Retrying chat completion request with max_completion_tokens")
+            return await create_completion(with_max_completion_tokens(model_args))
+
+        raise
+
+
 async def send_chat_request(request_body, request_headers):
     filtered_messages = []
     messages = request_body.get("messages", [])
@@ -361,7 +381,11 @@ async def send_chat_request(request_body, request_headers):
 
     try:
         azure_openai_client = await init_openai_client()
-        raw_response = await azure_openai_client.chat.completions.with_raw_response.create(**model_args)
+
+        async def create_completion(request_args):
+            return await azure_openai_client.chat.completions.with_raw_response.create(**request_args)
+
+        raw_response = await create_chat_completion_with_token_compat(create_completion, model_args)
         response = raw_response.parse()
         apim_request_id = raw_response.headers.get("apim-request-id")
     except Exception as e:
@@ -891,12 +915,20 @@ async def generate_title(conversation_messages) -> str:
         for msg in conversation_messages
     ]
     messages.append({"role": "user", "content": title_prompt})
+    model_args = {
+        "model": app_settings.azure_openai.model,
+        "messages": messages,
+        "temperature": 1,
+        "max_completion_tokens": 64,
+    }
 
     try:
         azure_openai_client = await init_openai_client()
-        response = await azure_openai_client.chat.completions.create(
-            model=app_settings.azure_openai.model, messages=messages, temperature=1, max_tokens=64
-        )
+
+        async def create_completion(request_args):
+            return await azure_openai_client.chat.completions.create(**request_args)
+
+        response = await create_chat_completion_with_token_compat(create_completion, model_args)
 
         title = response.choices[0].message.content
         return title

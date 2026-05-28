@@ -27,7 +27,8 @@ async def format_as_ndjson(r):
         async for event in r:
             yield json.dumps(event, cls=JSONEncoder) + "\n"
     except Exception as error:
-        logging.exception("Exception while generating response stream: %s", error)
+        logging.exception(
+            "Exception while generating response stream: %s", error)
         yield json.dumps({"error": str(error)})
 
 
@@ -36,6 +37,58 @@ def parse_multi_columns(columns: str) -> list:
         return columns.split("|")
     else:
         return columns.split(",")
+
+
+def with_max_completion_tokens(model_args: dict) -> dict:
+    if "max_tokens" not in model_args or "max_completion_tokens" in model_args:
+        return model_args.copy()
+
+    compat_args = model_args.copy()
+    compat_args["max_completion_tokens"] = compat_args.pop("max_tokens")
+    return compat_args
+
+
+def with_max_tokens(model_args: dict) -> dict:
+    if "max_completion_tokens" not in model_args or "max_tokens" in model_args:
+        return model_args.copy()
+
+    compat_args = model_args.copy()
+    compat_args["max_tokens"] = compat_args.pop("max_completion_tokens")
+    return compat_args
+
+
+def should_retry_with_max_tokens(error, model_args: dict) -> bool:
+    if "max_completion_tokens" not in model_args or "max_tokens" in model_args:
+        return False
+
+    error_message = str(error).lower()
+    return (
+        "max_completion_tokens" in error_message
+        and (
+            "max_tokens" in error_message
+            or "not supported" in error_message
+            or "unsupported" in error_message
+            or "unknown parameter" in error_message
+            or "unrecognized request argument" in error_message
+        )
+    )
+
+
+def should_retry_with_max_completion_tokens(error, model_args: dict) -> bool:
+    if "max_tokens" not in model_args or "max_completion_tokens" in model_args:
+        return False
+
+    error_message = str(error).lower()
+    return (
+        "max_tokens" in error_message
+        and (
+            "max_completion_tokens" in error_message
+            or "not supported" in error_message
+            or "unsupported" in error_message
+            or "unknown parameter" in error_message
+            or "unrecognized request argument" in error_message
+        )
+    )
 
 
 def fetchUserGroups(userToken, nextLink=None):
@@ -49,7 +102,8 @@ def fetchUserGroups(userToken, nextLink=None):
     try:
         r = requests.get(endpoint, headers=headers)
         if r.status_code != 200:
-            logging.error(f"Error fetching user groups: {r.status_code} {r.text}")
+            logging.error(
+                f"Error fetching user groups: {r.status_code} {r.text}")
             return []
 
         r = r.json()
@@ -106,6 +160,7 @@ def format_non_streaming_response(chatCompletion, history_metadata, apim_request
 
     return {}
 
+
 def format_stream_response(chatCompletionChunk, history_metadata, apim_request_id):
     response_obj = {
         "id": chatCompletionChunk.id,
@@ -121,7 +176,8 @@ def format_stream_response(chatCompletionChunk, history_metadata, apim_request_i
         delta = chatCompletionChunk.choices[0].delta
         if delta:
             if hasattr(delta, "context"):
-                messageObj = {"role": "tool", "content": json.dumps(delta.context)}
+                messageObj = {"role": "tool",
+                              "content": json.dumps(delta.context)}
                 response_obj["choices"][0]["messages"].append(messageObj)
                 return response_obj
             if delta.role == "assistant" and hasattr(delta, "context"):
@@ -154,7 +210,8 @@ def format_pf_non_streaming_response(
             "error": "No response received from promptflow endpoint increase PROMPTFLOW_RESPONSE_TIMEOUT parameter or check the promptflow endpoint."
         }
     if "error" in chatCompletion:
-        logging.error(f"Error in promptflow response api: {chatCompletion['error']}")
+        logging.error(
+            f"Error in promptflow response api: {chatCompletion['error']}")
         return {"error": chatCompletion["error"]}
 
     logging.debug(f"chatCompletion: {chatCompletion}")
@@ -163,11 +220,12 @@ def format_pf_non_streaming_response(
         if response_field_name in chatCompletion:
             messages.append({
                 "role": "assistant",
-                "content": chatCompletion[response_field_name] 
+                "content": chatCompletion[response_field_name]
             })
         if citations_field_name in chatCompletion:
-            citation_content= {"citations": chatCompletion[citations_field_name]}
-            messages.append({ 
+            citation_content = {
+                "citations": chatCompletion[citations_field_name]}
+            messages.append({
                 "role": "tool",
                 "content": json.dumps(citation_content)
             })
@@ -213,4 +271,3 @@ def comma_separated_string_to_list(s: str) -> List[str]:
     Split comma-separated values into a list.
     '''
     return s.strip().replace(' ', '').split(',')
-
