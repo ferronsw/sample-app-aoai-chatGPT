@@ -50,6 +50,11 @@ def test_dotenv_with_azure_search_success(app_settings):
     assert payload["parameters"] is not None
     assert payload["parameters"]["endpoint"] == "https://search_service.search.windows.net"
     assert "role_information" not in payload["parameters"]
+
+    legacy_payload = app_settings.datasource.construct_payload_configuration(
+        api_version="2024-05-01-preview"
+    )
+    assert legacy_payload["parameters"]["role_information"] == app_settings.azure_openai.system_message
     print(payload)
 
 

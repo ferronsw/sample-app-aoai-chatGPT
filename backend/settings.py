@@ -31,6 +31,7 @@ DOTENV_PATH = os.environ.get(
     )
 )
 MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION = "2024-09-01-preview"
+AZURE_OPENAI_CLASSIC_ON_YOUR_DATA_API_VERSION = "2024-05-01-preview"
 AZURE_OPENAI_ON_YOUR_DATA_ROLE_INFORMATION_REMOVED_API_VERSION = "2024-08-01-preview"
 
 
@@ -207,9 +208,7 @@ class _AzureOpenAISettings(BaseSettings):
             return None
 
     def is_reasoning_model(self) -> bool:
-        model_identifier = (
-            self.configured_model_name or self.model or ""
-        ).lower()
+        model_identifier = self.get_model_identifier()
         reasoning_prefixes = (
             "gpt-5",
             "o1",
@@ -217,6 +216,9 @@ class _AzureOpenAISettings(BaseSettings):
             "o4",
         )
         return model_identifier.startswith(reasoning_prefixes)
+
+    def get_model_identifier(self) -> str:
+        return (self.configured_model_name or self.model or "").lower()
 
 
 class _SearchCommonSettings(BaseSettings):
@@ -361,6 +363,10 @@ class _AzureSearchSettings(BaseSettings, DatasourcePayloadConstructor):
         **kwargs
     ):
         request = kwargs.pop('request', None)
+        api_version = kwargs.pop(
+            'api_version',
+            self._settings.azure_openai.preview_api_version
+        )
         if request and self.permitted_groups_column:
             self.filter = self._set_filter_string(request)
 
@@ -370,7 +376,7 @@ class _AzureSearchSettings(BaseSettings, DatasourcePayloadConstructor):
         parameters.update(self._settings.search.model_dump(
             exclude_none=True, by_alias=True))
         if (
-            self._settings.azure_openai.preview_api_version
+            api_version
             >= AZURE_OPENAI_ON_YOUR_DATA_ROLE_INFORMATION_REMOVED_API_VERSION
         ):
             parameters.pop("role_information", None)

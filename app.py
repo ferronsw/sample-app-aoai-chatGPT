@@ -26,7 +26,8 @@ from backend.security.ms_defender_utils import get_msdefender_user_json
 from backend.history.cosmosdbservice import CosmosConversationClient
 from backend.settings import (
     app_settings,
-    MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
+    AZURE_OPENAI_CLASSIC_ON_YOUR_DATA_API_VERSION,
+    MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION,
 )
 from backend.utils import (
     format_as_ndjson,
@@ -125,13 +126,17 @@ MS_DEFENDER_ENABLED = os.environ.get(
 
 
 # Initialize Azure OpenAI Client
-async def init_openai_client():
+async def init_openai_client(api_version=None):
     azure_openai_client = None
 
     try:
-        # API version check
+        effective_api_version = (
+            api_version or app_settings.azure_openai.preview_api_version
+        )
+
         if (
-            app_settings.azure_openai.preview_api_version
+            app_settings.azure_openai.is_reasoning_model()
+            and effective_api_version
             < MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
         ):
             raise ValueError(
@@ -174,7 +179,7 @@ async def init_openai_client():
         default_headers = {"x-ms-useragent": USER_AGENT}
 
         azure_openai_client = AsyncAzureOpenAI(
-            api_version=app_settings.azure_openai.preview_api_version,
+            api_version=effective_api_version,
             api_key=aoai_api_key,
             azure_ad_token_provider=ad_token_provider,
             default_headers=default_headers,
@@ -186,6 +191,39 @@ async def init_openai_client():
         logging.exception("Exception in Azure OpenAI initialization", e)
         azure_openai_client = None
         raise e
+
+
+def resolve_chat_request_options(use_datasource: bool) -> dict:
+    if use_datasource:
+        configured_model = (
+            app_settings.azure_openai.configured_model_name
+            or app_settings.azure_openai.model
+        )
+        if app_settings.azure_openai.is_reasoning_model():
+            raise ValueError(
+                "Classic Azure OpenAI On Your Data does not support reasoning models like "
+                f"'{configured_model}'. When DATASOURCE_TYPE is set, use a GPT-4o or GPT-4o-mini deployment, "
+                "or disable DATASOURCE_TYPE and use a different grounding path."
+            )
+
+        return {
+            "api_version": AZURE_OPENAI_CLASSIC_ON_YOUR_DATA_API_VERSION,
+            "token_parameter": "max_tokens",
+        }
+
+    api_version = app_settings.azure_openai.preview_api_version
+    if (
+        app_settings.azure_openai.is_reasoning_model()
+        and api_version < MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
+    ):
+        raise ValueError(
+            f"The minimum supported Azure OpenAI preview API version is '{MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION}'"
+        )
+
+    return {
+        "api_version": api_version,
+        "token_parameter": "max_completion_tokens",
+    }
 
 
 async def init_cosmosdb_client():
@@ -220,7 +258,12 @@ async def init_cosmosdb_client():
     return cosmos_conversation_client
 
 
-def prepare_model_args(request_body, request_headers):
+def prepare_model_args(
+    request_body,
+    request_headers,
+    token_parameter,
+    api_version,
+):
     request_messages = request_body.get("messages", [])
     messages = []
     if not app_settings.datasource:
@@ -262,19 +305,20 @@ def prepare_model_args(request_body, request_headers):
     model_args = {
         "messages": messages,
         "temperature": app_settings.azure_openai.temperature,
-        "max_completion_tokens": app_settings.azure_openai.max_tokens,
         "top_p": app_settings.azure_openai.top_p,
         "stop": app_settings.azure_openai.stop_sequence,
         "stream": app_settings.azure_openai.stream,
         "model": app_settings.azure_openai.model,
         "user": user_json
     }
+    model_args[token_parameter] = app_settings.azure_openai.max_tokens
 
     if app_settings.datasource:
         model_args["extra_body"] = {
             "data_sources": [
                 app_settings.datasource.construct_payload_configuration(
-                    request=request
+                    request=request,
+                    api_version=api_version,
                 )
             ]
         }
@@ -377,10 +421,20 @@ async def send_chat_request(request_body, request_headers):
             filtered_messages.append(message)
 
     request_body['messages'] = filtered_messages
-    model_args = prepare_model_args(request_body, request_headers)
+    request_options = resolve_chat_request_options(
+        use_datasource=bool(app_settings.datasource)
+    )
+    model_args = prepare_model_args(
+        request_body,
+        request_headers,
+        token_parameter=request_options["token_parameter"],
+        api_version=request_options["api_version"],
+    )
 
     try:
-        azure_openai_client = await init_openai_client()
+        azure_openai_client = await init_openai_client(
+            api_version=request_options["api_version"]
+        )
 
         async def create_completion(request_args):
             return await azure_openai_client.chat.completions.with_raw_response.create(**request_args)
@@ -915,15 +969,18 @@ async def generate_title(conversation_messages) -> str:
         for msg in conversation_messages
     ]
     messages.append({"role": "user", "content": title_prompt})
+    request_options = resolve_chat_request_options(use_datasource=False)
     model_args = {
         "model": app_settings.azure_openai.model,
         "messages": messages,
         "temperature": 1,
-        "max_completion_tokens": 64,
+        request_options["token_parameter"]: 64,
     }
 
     try:
-        azure_openai_client = await init_openai_client()
+        azure_openai_client = await init_openai_client(
+            api_version=request_options["api_version"]
+        )
 
         async def create_completion(request_args):
             return await azure_openai_client.chat.completions.create(**request_args)
