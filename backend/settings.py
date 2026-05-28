@@ -31,6 +31,7 @@ DOTENV_PATH = os.environ.get(
     )
 )
 MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION = "2024-09-01-preview"
+AZURE_OPENAI_ON_YOUR_DATA_ROLE_INFORMATION_REMOVED_API_VERSION = "2024-08-01-preview"
 
 
 class _UiSettings(BaseSettings):
@@ -105,6 +106,10 @@ class _AzureOpenAISettings(BaseSettings):
     key: Optional[str] = None
     resource: Optional[str] = None
     endpoint: Optional[str] = None
+    configured_model_name: Optional[str] = Field(
+        default=None,
+        validation_alias="AZURE_OPENAI_MODEL_NAME"
+    )
     temperature: float = 0
     top_p: float = 0
     max_tokens: int = 1000
@@ -200,6 +205,18 @@ class _AzureOpenAISettings(BaseSettings):
                 }
         else:
             return None
+
+    def is_reasoning_model(self) -> bool:
+        model_identifier = (
+            self.configured_model_name or self.model or ""
+        ).lower()
+        reasoning_prefixes = (
+            "gpt-5",
+            "o1",
+            "o3",
+            "o4",
+        )
+        return model_identifier.startswith(reasoning_prefixes)
 
 
 class _SearchCommonSettings(BaseSettings):
@@ -352,6 +369,11 @@ class _AzureSearchSettings(BaseSettings, DatasourcePayloadConstructor):
         parameters = self.model_dump(exclude_none=True, by_alias=True)
         parameters.update(self._settings.search.model_dump(
             exclude_none=True, by_alias=True))
+        if (
+            self._settings.azure_openai.preview_api_version
+            >= AZURE_OPENAI_ON_YOUR_DATA_ROLE_INFORMATION_REMOVED_API_VERSION
+        ):
+            parameters.pop("role_information", None)
 
         return {
             "type": self._type,
