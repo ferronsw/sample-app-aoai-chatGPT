@@ -5,6 +5,8 @@ import logging
 import uuid
 import httpx
 import asyncio
+from dataclasses import dataclass
+from typing import Any, Optional
 from quart import (
     Blueprint,
     Quart,
@@ -24,6 +26,7 @@ from azure.identity.aio import (
 from backend.auth.auth_utils import get_authenticated_user_details
 from backend.security.ms_defender_utils import get_msdefender_user_json
 from backend.history.cosmosdbservice import CosmosConversationClient
+from backend.azure_search_retrieval import retrieve_and_format_sources
 from backend.settings import (
     app_settings,
     AZURE_OPENAI_CLASSIC_ON_YOUR_DATA_API_VERSION,
@@ -31,8 +34,10 @@ from backend.settings import (
 )
 from backend.utils import (
     format_as_ndjson,
+    format_message_response,
     format_stream_response,
     format_non_streaming_response,
+    format_tool_response,
     convert_to_pf_format,
     format_pf_non_streaming_response,
     should_retry_with_max_tokens,
@@ -47,6 +52,14 @@ bp = Blueprint("routes", __name__, static_folder="static",
                template_folder="static")
 
 cosmos_db_ready = asyncio.Event()
+
+
+@dataclass
+class ChatRequestResult:
+    response: Any = None
+    apim_request_id: Optional[str] = None
+    tool_context: Optional[dict] = None
+    assistant_content: Optional[str] = None
 
 
 def create_app():
@@ -113,7 +126,7 @@ frontend_settings = {
         "show_chat_history_button": app_settings.ui.show_chat_history_button,
     },
     "sanitize_answer": app_settings.base_settings.sanitize_answer,
-    "oyd_enabled": app_settings.base_settings.datasource_type,
+    "oyd_enabled": bool(app_settings.base_settings.datasource_type),
     "application_insights": {
         "connection_string": app_settings.application_insights.connection_string
     }
@@ -193,6 +206,14 @@ async def init_openai_client(api_version=None):
         raise e
 
 
+def uses_app_managed_azure_search() -> bool:
+    return app_settings.base_settings.datasource_type == "AzureCognitiveSearch"
+
+
+def should_use_classic_datasource() -> bool:
+    return bool(app_settings.datasource) and not uses_app_managed_azure_search()
+
+
 def resolve_chat_request_options(use_datasource: bool) -> dict:
     if use_datasource:
         configured_model = (
@@ -263,16 +284,25 @@ def prepare_model_args(
     request_headers,
     token_parameter,
     api_version,
+    use_classic_datasource=False,
+    grounding_prompt=None,
 ):
     request_messages = request_body.get("messages", [])
     messages = []
-    if not app_settings.datasource:
+    if not use_classic_datasource:
         messages = [
             {
                 "role": "system",
                 "content": app_settings.azure_openai.system_message
             }
         ]
+        if grounding_prompt:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": grounding_prompt,
+                }
+            )
 
     for message in request_messages:
         if message:
@@ -313,7 +343,7 @@ def prepare_model_args(
     }
     model_args[token_parameter] = app_settings.azure_openai.max_tokens
 
-    if app_settings.datasource:
+    if use_classic_datasource and app_settings.datasource:
         model_args["extra_body"] = {
             "data_sources": [
                 app_settings.datasource.construct_payload_configuration(
@@ -421,14 +451,35 @@ async def send_chat_request(request_body, request_headers):
             filtered_messages.append(message)
 
     request_body['messages'] = filtered_messages
+    use_classic_datasource = should_use_classic_datasource()
     request_options = resolve_chat_request_options(
-        use_datasource=bool(app_settings.datasource)
+        use_datasource=use_classic_datasource
     )
+    grounding_result = None
+    if uses_app_managed_azure_search():
+        grounding_result = await retrieve_and_format_sources(
+            filtered_messages,
+            request,
+            app_settings,
+        )
+
+        if grounding_result.assistant_fallback:
+            return ChatRequestResult(
+                tool_context=(
+                    grounding_result.tool_message()
+                    if grounding_result.citations else None
+                ),
+                assistant_content=grounding_result.assistant_fallback,
+            )
+
     model_args = prepare_model_args(
         request_body,
         request_headers,
         token_parameter=request_options["token_parameter"],
         api_version=request_options["api_version"],
+        use_classic_datasource=use_classic_datasource,
+        grounding_prompt=(
+            grounding_result.prompt if grounding_result else None),
     )
 
     try:
@@ -446,7 +497,12 @@ async def send_chat_request(request_body, request_headers):
         logging.exception("Exception in send_chat_request")
         raise e
 
-    return response, apim_request_id
+    return ChatRequestResult(
+        response=response,
+        apim_request_id=apim_request_id,
+        tool_context=(grounding_result.tool_message(
+        ) if grounding_result and grounding_result.citations else None),
+    )
 
 
 async def complete_chat_request(request_body, request_headers):
@@ -460,18 +516,84 @@ async def complete_chat_request(request_body, request_headers):
             app_settings.promptflow.citations_field_name
         )
     else:
-        response, apim_request_id = await send_chat_request(request_body, request_headers)
+        chat_result = await send_chat_request(request_body, request_headers)
         history_metadata = request_body.get("history_metadata", {})
-        return format_non_streaming_response(response, history_metadata, apim_request_id)
+        if chat_result.assistant_content is not None:
+            response_id = str(uuid.uuid4())
+            messages = []
+            if chat_result.tool_context:
+                messages.append(
+                    format_tool_response(
+                        chat_result.tool_context,
+                        history_metadata,
+                        chat_result.apim_request_id,
+                        response_id=response_id,
+                        model=app_settings.azure_openai.model,
+                        object_name="chat.completion",
+                    )["choices"][0]["messages"][0]
+                )
+            messages.append(
+                format_message_response(
+                    "assistant",
+                    chat_result.assistant_content,
+                    history_metadata,
+                    chat_result.apim_request_id,
+                    response_id=response_id,
+                    model=app_settings.azure_openai.model,
+                    object_name="chat.completion",
+                )["choices"][0]["messages"][0]
+            )
+            return {
+                "id": response_id,
+                "model": app_settings.azure_openai.model,
+                "created": 0,
+                "object": "chat.completion",
+                "choices": [{"messages": messages}],
+                "history_metadata": history_metadata,
+                "apim-request-id": chat_result.apim_request_id,
+            }
+
+        return format_non_streaming_response(
+            chat_result.response,
+            history_metadata,
+            chat_result.apim_request_id,
+            tool_context=chat_result.tool_context,
+        )
 
 
 async def stream_chat_request(request_body, request_headers):
-    response, apim_request_id = await send_chat_request(request_body, request_headers)
+    chat_result = await send_chat_request(request_body, request_headers)
     history_metadata = request_body.get("history_metadata", {})
 
     async def generate():
-        async for completionChunk in response:
-            yield format_stream_response(completionChunk, history_metadata, apim_request_id)
+        if chat_result.tool_context:
+            yield format_tool_response(
+                chat_result.tool_context,
+                history_metadata,
+                chat_result.apim_request_id,
+                response_id=str(uuid.uuid4()),
+                model=app_settings.azure_openai.model,
+                object_name="chat.completion.chunk",
+            )
+
+        if chat_result.assistant_content is not None:
+            yield format_message_response(
+                "assistant",
+                chat_result.assistant_content,
+                history_metadata,
+                chat_result.apim_request_id,
+                response_id=str(uuid.uuid4()),
+                model=app_settings.azure_openai.model,
+                object_name="chat.completion.chunk",
+            )
+            return
+
+        async for completionChunk in chat_result.response:
+            yield format_stream_response(
+                completionChunk,
+                history_metadata,
+                chat_result.apim_request_id,
+            )
 
     return generate()
 

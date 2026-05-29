@@ -4,7 +4,7 @@ This repo contains sample code for a simple chat webapp that integrates with Azu
 
 ## Prerequisites
 - An existing Azure OpenAI resource and model deployment of a chat model (e.g. `gpt-35-turbo-16k`, `gpt-4`)
-- To use Azure OpenAI on your data, one of the following data sources:
+- To use grounding with Azure AI Search or another supported data source, one of the following data sources:
   - Azure AI Search Index
   - Azure CosmosDB Mongo vCore vector index
   - Elasticsearch index (preview)
@@ -157,7 +157,7 @@ Note: RBAC assignments can take a few minutes before becoming effective.
 
 #### Chat with your data
 
-[More information about Azure OpenAI on your data](https://learn.microsoft.com/en-us/azure/cognitive-services/openai/concepts/use-your-data)
+For `DATASOURCE_TYPE=AzureCognitiveSearch`, this app now uses app-managed Azure AI Search retrieval. The backend queries Azure AI Search directly, applies access filters at search time, injects a bounded grounding payload into the model prompt, and returns citations in the existing frontend `tool` message shape. It does not send Azure OpenAI `data_sources` for this path.
 
 #### Chat with your data using Azure Cognitive Search
 
@@ -174,7 +174,7 @@ Note: RBAC assignments can take a few minutes before becoming effective.
     |AZURE_SEARCH_INDEX|Yes||The name of your Azure AI Search Index|
     |AZURE_SEARCH_KEY|Optional if using Microsoft Entra ID -- see our documentation on the required resource setup for identity-based authentication.||An **admin key** for your Azure AI Search resource.|
     |AZURE_SEARCH_USE_SEMANTIC_SEARCH|No|False|Whether or not to use semantic search|
-    |AZURE_SEARCH_QUERY_TYPE|No|simple|Query type: simple, semantic, vector, vectorSimpleHybrid, or vectorSemanticHybrid. Takes precedence over AZURE_SEARCH_USE_SEMANTIC_SEARCH|
+    |AZURE_SEARCH_QUERY_TYPE|No|simple|Query type: simple, semantic, vector, vectorSimpleHybrid, or vectorSemanticHybrid. When vector fields and embeddings are configured, `simple` and `semantic` are automatically upgraded to hybrid retrieval.|
     |AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG|No||The name of the semantic search configuration to use if using semantic search.|
     |AZURE_SEARCH_TOP_K|No|5|The number of documents to retrieve when querying your search index.|
     |AZURE_SEARCH_ENABLE_IN_DOMAIN|No|True|Limits responses to only queries relating to your data.|
@@ -185,6 +185,15 @@ Note: RBAC assignments can take a few minutes before becoming effective.
     |AZURE_SEARCH_URL_COLUMN|No||Field from your search index that contains a URL for the document, e.g. an Azure Blob Storage URI. This value is not currently used.|
     |AZURE_SEARCH_VECTOR_COLUMNS|No||List of fields in your search index that contain vector embeddings of your documents to use when formulating a bot response. Represent these as a string joined with "|", e.g. `"product_description|product_manual"`|
     |AZURE_SEARCH_PERMITTED_GROUPS_COLUMN|No||Field from your Azure AI Search index that contains AAD group IDs that determine document-level access control.|
+    |AZURE_SEARCH_GROUNDING_MAX_DOCUMENTS|No|5|Maximum number of retrieved chunks to keep after ranking and de-duplication before they are sent to the model.|
+    |AZURE_SEARCH_GROUNDING_MAX_TOKENS|No|2000|Approximate prompt budget reserved for grounded source text. Retrieved chunks beyond this budget are dropped before the model call.|
+    |AZURE_SEARCH_GROUNDING_MAX_DOCUMENT_CHARS|No|1200|Maximum number of characters to keep from an individual retrieved chunk when building citations and prompt context.|
+    |AZURE_SEARCH_USE_SEMANTIC_CAPTIONS|No|True|When semantic ranking is active, prefer extractive semantic captions over full chunk text to keep grounding concise.|
+
+    Recommended for GPT-5.4 and other modern chat models:
+    - Keep `DATASOURCE_TYPE=AzureCognitiveSearch` and let the app manage retrieval instead of relying on Azure OpenAI `data_sources`.
+    - Use hybrid retrieval by configuring `AZURE_SEARCH_VECTOR_COLUMNS` and `AZURE_OPENAI_EMBEDDING_NAME`.
+    - Keep `AZURE_SEARCH_ENABLE_IN_DOMAIN=True` for knowledge-base assistants so empty retrieval short-circuits instead of hallucinating.
 
     When using your own data with a vector index, ensure these settings are configured on your app:
     - `AZURE_SEARCH_QUERY_TYPE`: can be `vector`, `vectorSimpleHybrid`, or `vectorSemanticHybrid`,
@@ -392,7 +401,7 @@ Next, enable logging on the app service. Go to "App Service logs" under Monitori
 Now, you should be able to see logs from your app by viewing "Log stream" under Monitoring.
 
 ### Changing Citation Display
-The Citation panel is defined at the end of `frontend/src/pages/chat/Chat.tsx`. The citations returned from Azure OpenAI On Your Data will include `content`, `title`, `filepath`, and in some cases `url`. You can customize the Citation section to use and display these as you like. For example, the title element is a clickable hyperlink if `url` is not a blob URL.
+The Citation panel is defined at the end of `frontend/src/pages/chat/Chat.tsx`. The citations returned by the backend grounding layer include `content`, `title`, `filepath`, and in some cases `url`. You can customize the Citation section to use and display these as you like. For example, the title element is a clickable hyperlink if `url` is not a blob URL.
 
 ```
     <h5 

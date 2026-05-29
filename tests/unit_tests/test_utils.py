@@ -1,6 +1,11 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 from backend.utils import (
     format_as_ndjson,
+    format_non_streaming_response,
+    format_tool_response,
     parse_multi_columns,
     should_retry_with_max_tokens,
     should_retry_with_max_completion_tokens,
@@ -83,3 +88,49 @@ def test_should_not_retry_with_max_completion_tokens_for_other_errors():
 
     assert should_retry_with_max_completion_tokens(
         error, {"max_tokens": 128}) is False
+
+
+def test_format_tool_response_serializes_tool_context():
+    response = format_tool_response(
+        {"citations": [{"id": "1"}], "intent": "question"},
+        history_metadata={"conversation_id": "conv-1"},
+        apim_request_id="req-1",
+        response_id="resp-1",
+        model="gpt-5.4",
+    )
+
+    assert response["choices"][0]["messages"][0]["role"] == "tool"
+    assert json.loads(response["choices"][0]["messages"][0]["content"]) == {
+        "citations": [{"id": "1"}],
+        "intent": "question",
+    }
+
+
+def test_format_non_streaming_response_prefers_explicit_tool_context():
+    completion = SimpleNamespace(
+        id="resp-1",
+        model="gpt-5.4",
+        created=1,
+        object="chat.completion",
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Grounded answer [doc1].",
+                    context={"citations": [{"id": "legacy"}]},
+                )
+            )
+        ],
+    )
+
+    response = format_non_streaming_response(
+        completion,
+        history_metadata={},
+        apim_request_id="req-1",
+        tool_context={"citations": [{"id": "1"}], "intent": "question"},
+    )
+
+    assert json.loads(response["choices"][0]["messages"][0]["content"]) == {
+        "citations": [{"id": "1"}],
+        "intent": "question",
+    }
+    assert response["choices"][0]["messages"][1]["content"] == "Grounded answer [doc1]."

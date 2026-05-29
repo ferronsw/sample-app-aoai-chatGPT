@@ -24,13 +24,15 @@ def test_resolve_chat_request_options_uses_classic_api_for_datasource():
     )
 
     request_options = app_module.resolve_chat_request_options(
-        use_datasource=True
+        use_datasource=app_module.should_use_classic_datasource()
     )
 
+    assert app_module.uses_app_managed_azure_search() is True
+    assert app_module.should_use_classic_datasource() is False
     assert request_options["api_version"] == (
-        settings_module.AZURE_OPENAI_CLASSIC_ON_YOUR_DATA_API_VERSION
+        settings_module.MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
     )
-    assert request_options["token_parameter"] == "max_tokens"
+    assert request_options["token_parameter"] == "max_completion_tokens"
 
 
 def test_resolve_chat_request_options_rejects_reasoning_models_with_datasource():
@@ -53,3 +55,34 @@ def test_resolve_chat_request_options_uses_preview_api_for_reasoning_model_witho
         settings_module.MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
     )
     assert request_options["token_parameter"] == "max_completion_tokens"
+
+
+def test_prepare_model_args_uses_grounding_prompt_for_app_managed_azure_search():
+    _, app_module = load_app_module("dotenv_with_azure_search_success")
+    app_module.MS_DEFENDER_ENABLED = False
+
+    model_args = app_module.prepare_model_args(
+        request_body={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Where can I request access?",
+                }
+            ]
+        },
+        request_headers={},
+        token_parameter="max_completion_tokens",
+        api_version=app_module.app_settings.azure_openai.preview_api_version,
+        use_classic_datasource=False,
+        grounding_prompt="Retrieved sources:\n[doc1] Access policy",
+    )
+
+    assert "extra_body" not in model_args
+    assert model_args["messages"][0]["role"] == "system"
+    assert model_args["messages"][0]["content"] == (
+        app_module.app_settings.azure_openai.system_message
+    )
+    assert model_args["messages"][1]["content"] == (
+        "Retrieved sources:\n[doc1] Access policy"
+    )
+    assert model_args["messages"][2]["content"] == "Where can I request access?"

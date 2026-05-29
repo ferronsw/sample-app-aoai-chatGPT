@@ -129,21 +129,99 @@ def generateFilterString(userToken):
     return f"{AZURE_SEARCH_PERMITTED_GROUPS_COLUMN}/any(g:search.in(g, '{group_ids}'))"
 
 
-def format_non_streaming_response(chatCompletion, history_metadata, apim_request_id):
-    response_obj = {
-        "id": chatCompletion.id,
-        "model": chatCompletion.model,
-        "created": chatCompletion.created,
-        "object": chatCompletion.object,
+def _create_response_envelope(
+    response_id,
+    model,
+    created,
+    object_name,
+    history_metadata,
+    apim_request_id,
+):
+    return {
+        "id": response_id,
+        "model": model,
+        "created": created,
+        "object": object_name,
         "choices": [{"messages": []}],
         "history_metadata": history_metadata,
         "apim-request-id": apim_request_id,
     }
 
+
+def format_message_response(
+    role,
+    content,
+    history_metadata,
+    apim_request_id,
+    response_id="",
+    model="",
+    created=0,
+    object_name="chat.completion",
+):
+    response_obj = _create_response_envelope(
+        response_id,
+        model,
+        created,
+        object_name,
+        history_metadata,
+        apim_request_id,
+    )
+    response_obj["choices"][0]["messages"].append(
+        {
+            "role": role,
+            "content": content,
+        }
+    )
+    return response_obj
+
+
+def format_tool_response(
+    tool_context,
+    history_metadata,
+    apim_request_id,
+    response_id="",
+    model="",
+    created=0,
+    object_name="chat.completion",
+):
+    return format_message_response(
+        "tool",
+        json.dumps(tool_context),
+        history_metadata,
+        apim_request_id,
+        response_id=response_id,
+        model=model,
+        created=created,
+        object_name=object_name,
+    )
+
+
+def format_non_streaming_response(
+    chatCompletion,
+    history_metadata,
+    apim_request_id,
+    tool_context=None,
+):
+    response_obj = _create_response_envelope(
+        chatCompletion.id,
+        chatCompletion.model,
+        chatCompletion.created,
+        chatCompletion.object,
+        history_metadata,
+        apim_request_id,
+    )
+
     if len(chatCompletion.choices) > 0:
         message = chatCompletion.choices[0].message
         if message:
-            if hasattr(message, "context"):
+            if tool_context:
+                response_obj["choices"][0]["messages"].append(
+                    {
+                        "role": "tool",
+                        "content": json.dumps(tool_context),
+                    }
+                )
+            elif hasattr(message, "context"):
                 response_obj["choices"][0]["messages"].append(
                     {
                         "role": "tool",
@@ -162,15 +240,14 @@ def format_non_streaming_response(chatCompletion, history_metadata, apim_request
 
 
 def format_stream_response(chatCompletionChunk, history_metadata, apim_request_id):
-    response_obj = {
-        "id": chatCompletionChunk.id,
-        "model": chatCompletionChunk.model,
-        "created": chatCompletionChunk.created,
-        "object": chatCompletionChunk.object,
-        "choices": [{"messages": []}],
-        "history_metadata": history_metadata,
-        "apim-request-id": apim_request_id,
-    }
+    response_obj = _create_response_envelope(
+        chatCompletionChunk.id,
+        chatCompletionChunk.model,
+        chatCompletionChunk.created,
+        chatCompletionChunk.object,
+        history_metadata,
+        apim_request_id,
+    )
 
     if len(chatCompletionChunk.choices) > 0:
         delta = chatCompletionChunk.choices[0].delta

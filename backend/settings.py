@@ -171,11 +171,11 @@ class _AzureOpenAISettings(BaseSettings):
     @model_validator(mode="after")
     def ensure_endpoint(self) -> Self:
         if self.endpoint:
-            return Self
+            return self
 
         elif self.resource:
             self.endpoint = f"https://{self.resource}.openai.azure.com"
-            return Self
+            return self
 
         raise ValidationError(
             "AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_RESOURCE is required")
@@ -296,6 +296,10 @@ class _AzureSearchSettings(BaseSettings, DatasourcePayloadConstructor):
         'vectorSemanticHybrid'
     ] = "simple"
     permitted_groups_column: Optional[str] = Field(default=None, exclude=True)
+    grounding_max_documents: int = Field(default=5, exclude=True)
+    grounding_max_tokens: int = Field(default=2000, exclude=True)
+    grounding_max_document_chars: int = Field(default=1200, exclude=True)
+    use_semantic_captions: bool = Field(default=True, exclude=True)
 
     # Constructed fields
     endpoint: Optional[str] = None
@@ -340,6 +344,7 @@ class _AzureSearchSettings(BaseSettings, DatasourcePayloadConstructor):
     @model_validator(mode="after")
     def set_query_type(self) -> Self:
         self.query_type = to_snake(self.query_type)
+        return self
 
     def _set_filter_string(self, request: Request) -> str:
         if self.permitted_groups_column:
@@ -356,6 +361,54 @@ class _AzureSearchSettings(BaseSettings, DatasourcePayloadConstructor):
             return filter_string
 
         return None
+
+    def build_filter(self, request: Optional[Request]) -> Optional[str]:
+        if request and self.permitted_groups_column:
+            return self._set_filter_string(request)
+
+        return None
+
+    def has_vector_search(self) -> bool:
+        return bool(self.vector_columns)
+
+    def has_embedding_configuration(self) -> bool:
+        return self._settings.azure_openai.extract_embedding_dependency() is not None
+
+    def get_runtime_query_type(self) -> str:
+        configured_query_type = to_snake(self.query_type)
+
+        if configured_query_type == "simple" and self.use_semantic_search:
+            configured_query_type = "semantic"
+
+        if not self.has_vector_search() or not self.has_embedding_configuration():
+            return configured_query_type
+
+        if configured_query_type == "simple":
+            if self.semantic_search_config or self.use_semantic_search:
+                return "vector_semantic_hybrid"
+            return "vector_simple_hybrid"
+
+        if configured_query_type == "semantic":
+            return "vector_semantic_hybrid"
+
+        return configured_query_type
+
+    def get_select_fields(self) -> List[str]:
+        fields = [
+            *(self.content_columns or []),
+            self.title_column,
+            self.url_column,
+            self.filename_column,
+        ]
+
+        seen_fields = set()
+        ordered_fields = []
+        for field in fields:
+            if field and field not in seen_fields:
+                seen_fields.add(field)
+                ordered_fields.append(field)
+
+        return ordered_fields
 
     def construct_payload_configuration(
         self,
