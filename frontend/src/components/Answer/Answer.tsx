@@ -67,22 +67,20 @@ export const Answer = ({ answer, onCitationClicked, onExectResultClicked }: Prop
   }, [appStateContext?.state.feedbackState, feedbackState, answer.message_id])
 
   const createCitationFilepath = (citation: Citation, index: number, truncate: boolean = false) => {
-    let citationFilename = ''
+    const citationSource = citation.filepath ?? citation.title ?? citation.url
+    const part_i = citation.part_index ?? (citation.chunk_id ? parseInt(citation.chunk_id) + 1 : '')
 
-    if (citation.filepath) {
-      const part_i = citation.part_index ?? (citation.chunk_id ? parseInt(citation.chunk_id) + 1 : '')
-      if (truncate && citation.filepath.length > filePathTruncationLimit) {
-        const citationLength = citation.filepath.length
-        citationFilename = `${citation.filepath.substring(0, 20)}...${citation.filepath.substring(citationLength - 20)} - Part ${part_i}`
-      } else {
-        citationFilename = `${citation.filepath} - Part ${part_i}`
-      }
-    } else if (citation.filepath && citation.reindex_id) {
-      citationFilename = `${citation.filepath} - Part ${citation.reindex_id}`
-    } else {
-      citationFilename = `Citation ${index}`
+    if (!citationSource) {
+      return `Citation ${index}`
     }
-    return citationFilename
+
+    let citationFilename = citationSource
+    if (truncate && citationSource.length > filePathTruncationLimit) {
+      const citationLength = citationSource.length
+      citationFilename = `${citationSource.substring(0, 20)}...${citationSource.substring(citationLength - 20)}`
+    }
+
+    return part_i ? `${citationFilename} - Part ${part_i}` : citationFilename
   }
 
   const onLikeResponseClicked = async () => {

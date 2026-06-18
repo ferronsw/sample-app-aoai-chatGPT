@@ -9,14 +9,14 @@ export type ParsedAnswer = {
 } | null
 
 export const enumerateCitations = (citations: Citation[]) => {
-  const filepathMap = new Map()
+  const sourceMap = new Map()
   for (const citation of citations) {
-    const { filepath } = citation
+    const citationSource = citation.filepath ?? citation.title ?? citation.url ?? citation.id
     let part_i = 1
-    if (filepathMap.has(filepath)) {
-      part_i = filepathMap.get(filepath) + 1
+    if (sourceMap.has(citationSource)) {
+      part_i = sourceMap.get(citationSource) + 1
     }
-    filepathMap.set(filepath, part_i)
+    sourceMap.set(citationSource, part_i)
     citation.part_index = part_i
   }
   return citations

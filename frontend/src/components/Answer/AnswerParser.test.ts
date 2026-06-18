@@ -53,4 +53,47 @@ describe('enumerateCitations', () => {
     expect(results[1].part_index).toEqual(2)
     expect(results[2].part_index).toEqual(1)
   })
+
+  it('assigns part_index based on title when filepath is missing', () => {
+    const citations: Citation[] = [
+      {
+        id: 'doc1',
+        filepath: null,
+        part_index: undefined,
+        content: '',
+        title: 'Modern Workplace',
+        url: 'https://contoso.example/modern-workplace',
+        metadata: null,
+        chunk_id: null,
+        reindex_id: null
+      },
+      {
+        id: 'doc2',
+        filepath: null,
+        part_index: undefined,
+        content: '',
+        title: 'Modern Workplace',
+        url: 'https://contoso.example/modern-workplace',
+        metadata: null,
+        chunk_id: null,
+        reindex_id: null
+      },
+      {
+        id: 'doc3',
+        filepath: null,
+        part_index: undefined,
+        content: '',
+        title: 'Security Baseline',
+        url: 'https://contoso.example/security-baseline',
+        metadata: null,
+        chunk_id: null,
+        reindex_id: null
+      }
+    ]
+
+    const results = enumerateCitations(cloneDeep(citations))
+    expect(results[0].part_index).toEqual(1)
+    expect(results[1].part_index).toEqual(2)
+    expect(results[2].part_index).toEqual(1)
+  })
 })
